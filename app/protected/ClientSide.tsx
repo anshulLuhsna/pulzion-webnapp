@@ -15,13 +15,29 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { exec } from "child_process";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { toast } from 'react-toastify'; // Import toast
+import 'react-toastify/dist/ReactToastify.css'; // Import toast CSS
 
 interface Question {
   query: string;
+  status?: "success" | "error" | "retrying"; 
+  error?: string; 
 }
 type Notes = Tables<'notes'>;
 
-export default function ProtectedPage({ notes, user }: { notes: any, user: any }) {
+export default function ProtectedPage({ tableNames, user, tableData }: { user: any, tableNames: any, tableData: any }) {
+  const [naturalLanguageResponse, setNaturalLanguageResponse] = useState("");
+  const [summary, setSummary] = useState("");
   const [dynamicQuesLoading, setDynamicQuesLoading] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([
     { query: "" },
@@ -37,7 +53,9 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
     database?: string; // Changed dbname to database for MongoDB
     collection?: string; // Added for MongoDB
   }
-
+  useEffect(() => {
+    console.log("Here", tableData, tableNames)
+  }, [tableData, tableNames]);
   const [dbParams, setDbParams] = useState<DbParams>({});
   const [questionInput, setQuestionInput] = useState("");
   const [generatedQuery, setGeneratedQuery] = useState("");
@@ -48,9 +66,9 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
 
   const handleDbTypeChange = (selectedDbType: string) => {
     setDbType(selectedDbType);
-    setDbParams({}); // Reset parameters when database type changes
+    setDbParams({});
   };
-
+  // console.log("Here",tableData,tableNames)
   const handleDbParamChange = (paramName: string, value: any) => {
     setDbParams((prevParams) => ({ ...prevParams, [paramName]: value }));
   };
@@ -63,7 +81,7 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ eventDescription }),
+        body: JSON.stringify({ eventDescription, tableData, tableNames }),
       });
 
       if (!response.ok) {
@@ -78,35 +96,119 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
     setDynamicQuesLoading(false);
   };
 
-  const executeQuery = async (query: string) => {
+  const executeQuery = async (query: string, questionIndex: number) => {
+    setQuestions((prevQuestions) =>
+      prevQuestions.map((q, i) =>
+        i === questionIndex ? { ...q, status: "retrying" } : q
+      )
+    );
+
     try {
       const { error } = await supabase.rpc('execute_query', {
         query_string: query
       });
       if (error) {
         console.error("Error executing query:", error);
+        toast.error("Error executing query");
+
+        setQuestions((prevQuestions) =>
+          prevQuestions.map((q, i) =>
+            i === questionIndex ? { ...q, status: "error", error: (error as unknown as Error).message } : q
+          )
+        );
+
+        let newEventDescription = eventDescription + " " + error.message;
+        try {
+          const response = await fetch("/api/generateQuery", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              eventDescription: newEventDescription,
+              tableData,
+              tableNames,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`API request failed with status ${response.status}`);
+          }
+
+          const generatedQuestions: Question = await response.json();
+          console.log("Retried query:", generatedQuestions.query);
+
+          setQuestions((prevQuestions) => [
+            ...prevQuestions,
+            { ...generatedQuestions, status: "retrying" },
+          ]);
+
+          executeQuery(generatedQuestions.query, questions.length); 
+        } catch (retryError) {
+          console.error("Error retrying query:", retryError);
+          toast.error("Error retrying query");
+
+          setQuestions((prevQuestions) =>
+            prevQuestions.map((q, i) =>
+              i === questions.length - 1 ? { ...q, status: "error", error: (retryError as Error).message } : q
+            )
+          );
+        }
+
       } else {
-        // Query executed successfully, you might want to refetch data or update the UI
         console.log("Query executed successfully");
+        toast.success("Query executed successfully"); 
+
+        const { data: tableNames, error: tableNamesError } = await supabase.rpc('get_all_table_names')
+        const tableDataPromises = (tableNames || []).map(async (tableName: any) => {
+          const { data, error } = await supabase.from(tableName).select();
+          if (error) {
+            console.error(`Error fetching data for ${tableName}:`, error);
+            return [tableName, []]; 
+          }
+          return [tableName, data];
+        });
+      
+        const tableDataArray = await Promise.all(tableDataPromises);
+        let tableData = Object.fromEntries(tableDataArray);
+        console.log(tableData)
+        if (tableNamesError) {
+          console.error("Error fetching table data:", tableNamesError);
+        } else {
+          const updatedTableData: Record<string, any> = {};
+          
+          console.log(updatedTableData)
+        }
+
+        setQuestions((prevQuestions) =>
+          prevQuestions.map((q, i) =>
+            i === questionIndex ? { ...q, status: "success" } : q
+          )
+        );
       }
     } catch (error) {
       console.error("Error executing query:", error);
+      toast.error("Error executing query");
+
+      setQuestions((prevQuestions) =>
+        prevQuestions.map((q, i) =>
+          i === questionIndex ? { ...q, status: "error", error: (error as Error).message } : q
+        )
+      );
     }
   }
   const askQuestion = async () => {
-    // ... (Get question, dbType, and dbParams from your UI)
-
     try {
       const generateQueryResponse = await fetch('http://localhost:5000/generate_query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionInput })
+        body: JSON.stringify({ questionInput, dbType, dbParams }),
       });
 
       const generateQueryData = await generateQueryResponse.json();
       const generatedQuery = generateQueryData.query;
       console.log(generatedQuery)
-      setGeneratedQuery(generatedQuery); // Update the generatedQuery state
+      setGeneratedQuery(generatedQuery); 
 
       const executeQueryResponse = await fetch('http://localhost:5000/execute_query', {
         method: 'POST',
@@ -116,9 +218,12 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
 
       const executeQueryData = await executeQueryResponse.json();
       const results = executeQueryData.results;
-      console.log(results)
-      setQueryResults(results); // Update the queryResults state
-      // ... (Update your UI with the generatedQuery and results)
+      
+      setNaturalLanguageResponse(executeQueryData.natural_language_response);
+      setSummary(executeQueryData.summary);
+      console.log(results, executeQueryData.natural_language_response);
+      console.log(executeQueryData.summary);
+      setQueryResults(results); 
     } catch (error) {
       // ... (Handle errors)
     }
@@ -126,7 +231,6 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
 
   return (
     <div className="flex w-full h-screen">
-      {/* Sidebar (25% width) */}
       <div className="w-1/4  p-4">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -152,7 +256,6 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Database Parameters */}
         {dbType === "sqlite" && (
           <div className="mt-4">
             <Input
@@ -188,13 +291,12 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
             />
             <Input
               placeholder="PostgreSQL Database Name"
-              value={dbParams.database || ""} // Use database instead of dbname
+              value={dbParams.database || ""} 
               onChange={(e) => handleDbParamChange("database", e.target.value)}
             />
           </div>
         )}
         {dbType === "mysql" && (
-          // Add similar input fields for MySQL
           <div className="mt-4 space-y-2">
             <Input
               placeholder="MySQL Host"
@@ -220,13 +322,12 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
             />
             <Input
               placeholder="MySQL Database Name"
-              value={dbParams.database || ""} // Use database instead of dbname
+              value={dbParams.database || ""} 
               onChange={(e) => handleDbParamChange("database", e.target.value)}
             />
           </div>
         )}
         {dbType === "mongodb" && (
-          // Add input fields for MongoDB
           <div className="mt-4 space-y-2">
             <Input
               placeholder="MongoDB Host"
@@ -253,66 +354,110 @@ export default function ProtectedPage({ notes, user }: { notes: any, user: any }
         )}
       </div>
 
-      {/* Main Content (75% width) */}
       <div className="flex-1 w-3/4 p-8">
         <div className="flex flex-col gap-12">
           {dbType === "Supabase" && (
             <div>
-            <div className="flex flex-col gap-2"></div>
-            <Textarea
-              placeholder="Query description"
-              value={eventDescription}
-              onChange={(e) => setEventDescription(e.target.value)}
-            />
-            <Button variant="secondary" type="button" className="my-4" onClick={addQuestionDynamic}>
-              Generate Query
-            </Button>
-            <pre>{JSON.stringify(notes, null, 2)}</pre>
-            <div className="">
-              {questions.map((question) => {
-                return <div className=" p-4 rounded-lg">
-                  <h2>{question.query}</h2>
-                  <Button onClick={() => executeQuery(question.query)}>Execute Query</Button>
+              <div className="flex flex-col gap-2"></div>
+              <Textarea
+                placeholder="Query description"
+                value={eventDescription}
+                onChange={(e) => setEventDescription(e.target.value)}
+              />
+              <Button variant="secondary" type="button" className="my-4" onClick={addQuestionDynamic}>
+                Generate Query
+              </Button>
+
+              <div className="">
+                {questions.map((question, index) => (
+                  <div key={index} className="p-4 rounded-lg">
+                    <h2>{question.query}</h2>
+                    {question.status === "error" && (
+                      <div className="text-red-500">Error: {question.error}</div>
+                    )}
+                    {question.status === "retrying" && (
+                      <div className="text-blue-500">Retrying...</div>
+                    )}
+                    {question.query && question.status !== "retrying" && (
+                      <Button onClick={() => executeQuery(question.query, index)}>
+                        Execute Query
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {Object.keys(tableData).map((tableName) => (
+                <div key={tableName} className="border rounded-md p-4">
+                  <h2 className="text-xl font-semibold mb-2">{tableName}</h2>
+                  {tableData[tableName]?.length > 0 ? (
+                    <Table>
+                      <TableCaption>List of {tableName}</TableCaption>
+                      <TableHeader>
+                        <TableRow>
+                          {Object.keys(tableData[tableName][0]).map((header) => (
+                            <TableHead key={header}>{header}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tableData[tableName].map((row: Record<string, any>, index: number) => (
+                          <TableRow key={index}>
+                            {Object.values(row).map((cell, cellIndex) => (
+                              <TableCell key={cellIndex}>{cell}</TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p>No data found for {tableName}</p>
+                  )}
                 </div>
-              })}
+              ))}
             </div>
-            {/* <FetchDataSteps /> */}
-          </div>
+
+
           )
 
           }
-          
+
           {
             dbType !== "Supabase" && (
-<div>
-            <Input
-              placeholder="Input your question in natural language"
-              value={questionInput}
-              onChange={(e) => setQuestionInput(e.target.value)}
-            />
-            <Button onClick={askQuestion}>Ask the question</Button>
-
-            {generatedQuery && (
               <div>
-                <h3>Generated SQL/Query:</h3>
-                <pre>{generatedQuery}</pre>
-              </div>
-            )}
+                <Input
+                  placeholder="Input your question in natural language"
+                  value={questionInput}
+                  onChange={(e) => setQuestionInput(e.target.value)}
+                />
+                <Button onClick={askQuestion}>Ask the question</Button>
 
-            {queryResults?.length > 0 && (
-              <div>
-                <h3>Query Results:</h3>
-                <ul>
-                  {queryResults.map((row, index) => (
-                    <li key={index}>{JSON.stringify(row)}</li>
-                  ))}
-                </ul>
+                {generatedQuery && (
+                  <div>
+                    <h3>Generated SQL/Query:</h3>
+                    <pre>{generatedQuery}</pre>
+                  </div>
+                )}
+
+                {queryResults?.length > 0 && (
+                  <div>
+                    <h3>Query Results:</h3>
+                    <ul>
+                      {queryResults.map((row, index) => (
+                        <li key={index}>{JSON.stringify(row)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {naturalLanguageResponse && (
+                  <div>
+                    <h3>Natural Language Response:</h3>
+                    <p>{naturalLanguageResponse}</p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
             )
           }
-          
+
         </div>
       </div>
     </div>
