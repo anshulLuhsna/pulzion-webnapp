@@ -27,11 +27,12 @@ import {
 } from "@/components/ui/table"
 import { toast } from 'react-toastify'; // Import toast
 import 'react-toastify/dist/ReactToastify.css'; // Import toast CSS
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'; // Import Recharts components
 
 interface Question {
   query: string;
-  status?: "success" | "error" | "retrying"; 
-  error?: string; 
+  status?: "success" | "error" | "retrying";
+  error?: string;
 }
 type Notes = Tables<'notes'>;
 
@@ -60,6 +61,9 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
   const [questionInput, setQuestionInput] = useState("");
   const [generatedQuery, setGeneratedQuery] = useState("");
   const [queryResults, setQueryResults] = useState([]);
+
+  const [chartData, setChartData] = useState<any[]>([]); // State to store chart data
+  const [chartType, setChartType] = useState<string | null>(null); // State to store chart type
 
   const supabase = createClient();
   const router = useRouter();
@@ -92,6 +96,44 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
       setQuestions([...questions, generatedQuestions]);
     } catch (error) {
       console.error("Error generating questions:", error);
+    }
+    setDynamicQuesLoading(false);
+  };
+
+  const visualize = async (result: any) => {
+    setDynamicQuesLoading(true);
+    console.log(result)
+    try {
+      const response = await fetch("/api/visualize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ result }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+      const visualizationData: any = await response.json();
+      // console.log(generatedQuestions)
+      console.log("Visualize: ", visualizationData);
+
+      if (visualizationData.canVisualize) {
+        // Prepare data for Recharts
+        const chartData = visualizationData.chartData || []; // Assuming the API provides chartData
+        setChartData(chartData); 
+        console.log(visualizationData.chartData)
+        setChartType(visualizationData.graphType);
+
+        toast.success("Data visualized!"); 
+      } else {
+        toast.info("Data cannot be visualized in a meaningful way.");
+      }
+
+    } catch (error) {
+      console.error("Error generating questions:", error);
+      toast.error("Error checking visualization options.");
     }
     setDynamicQuesLoading(false);
   };
@@ -143,7 +185,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
             { ...generatedQuestions, status: "retrying" },
           ]);
 
-          executeQuery(generatedQuestions.query, questions.length); 
+          executeQuery(generatedQuestions.query, questions.length);
         } catch (retryError) {
           console.error("Error retrying query:", retryError);
           toast.error("Error retrying query");
@@ -157,18 +199,18 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
 
       } else {
         console.log("Query executed successfully");
-        toast.success("Query executed successfully"); 
+        toast.success("Query executed successfully");
 
         const { data: tableNames, error: tableNamesError } = await supabase.rpc('get_all_table_names')
         const tableDataPromises = (tableNames || []).map(async (tableName: any) => {
           const { data, error } = await supabase.from(tableName).select();
           if (error) {
             console.error(`Error fetching data for ${tableName}:`, error);
-            return [tableName, []]; 
+            return [tableName, []];
           }
           return [tableName, data];
         });
-      
+
         const tableDataArray = await Promise.all(tableDataPromises);
         let tableData = Object.fromEntries(tableDataArray);
         console.log(tableData)
@@ -176,7 +218,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
           console.error("Error fetching table data:", tableNamesError);
         } else {
           const updatedTableData: Record<string, any> = {};
-          
+
           console.log(updatedTableData)
         }
 
@@ -208,7 +250,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
       const generateQueryData = await generateQueryResponse.json();
       const generatedQuery = generateQueryData.query;
       console.log(generatedQuery)
-      setGeneratedQuery(generatedQuery); 
+      setGeneratedQuery(generatedQuery);
 
       const executeQueryResponse = await fetch('http://localhost:5000/execute_query', {
         method: 'POST',
@@ -218,12 +260,12 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
 
       const executeQueryData = await executeQueryResponse.json();
       const results = executeQueryData.results;
-      
+      visualize(results); // Call visualize function here 
       setNaturalLanguageResponse(executeQueryData.natural_language_response);
       setSummary(executeQueryData.summary);
       console.log(results, executeQueryData.natural_language_response);
       console.log(executeQueryData.summary);
-      setQueryResults(results); 
+      setQueryResults(results);
     } catch (error) {
       // ... (Handle errors)
     }
@@ -291,7 +333,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
             />
             <Input
               placeholder="PostgreSQL Database Name"
-              value={dbParams.database || ""} 
+              value={dbParams.database || ""}
               onChange={(e) => handleDbParamChange("database", e.target.value)}
             />
           </div>
@@ -322,7 +364,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
             />
             <Input
               placeholder="MySQL Database Name"
-              value={dbParams.database || ""} 
+              value={dbParams.database || ""}
               onChange={(e) => handleDbParamChange("database", e.target.value)}
             />
           </div>
@@ -448,6 +490,24 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
                     </ul>
                   </div>
                 )}
+
+                {chartData.length > 0 && chartType && (
+                  <div>
+                    <h3>Visualization:</h3>
+                    {chartType === 'Bar Chart' && ( // Render BarChart if graphType is 'Bar graph'
+                      <BarChart width={600} height={300} data={chartData}>
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <CartesianGrid stroke="#f5f5f5" />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="value" fill="#8884d8" /> 
+                      </BarChart>
+                    )}
+                    {/* Add more chart types (e.g., LineChart, PieChart) based on visualizationData.graphType */}
+                  </div>
+                )}
+
                 {naturalLanguageResponse && (
                   <div>
                     <h3>Natural Language Response:</h3>
