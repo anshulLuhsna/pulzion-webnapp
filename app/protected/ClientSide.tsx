@@ -27,7 +27,13 @@ import {
 } from "@/components/ui/table"
 import { toast } from 'react-toastify'; // Import toast
 import 'react-toastify/dist/ReactToastify.css'; // Import toast CSS
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'; // Import Recharts components
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  LineChart, Line,
+  PieChart, Pie, Cell 
+} from 'recharts'; // Import Recharts components
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Question {
   query: string;
@@ -43,6 +49,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
   const [questions, setQuestions] = useState<Question[]>([
     { query: "" },
   ]);
+  const [activeChart, setActiveChart] = useState('bar'); // State to manage active chart type
   const [eventDescription, setEventDescription] = useState("");
   const [dbType, setDbType] = useState("sqlite"); // Default to SQLite
   interface DbParams {
@@ -58,13 +65,15 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
     console.log("Here", tableData, tableNames)
   }, [tableData, tableNames]);
   const [dbParams, setDbParams] = useState<DbParams>({});
+  const [visualLoading, setVisualLoading] = useState(false)
   const [questionInput, setQuestionInput] = useState("");
-  const [generatedQuery, setGeneratedQuery] = useState("");
+  const [generatedQuery, setGeneratedQuery] = useState<string[]>([]);
   const [queryResults, setQueryResults] = useState([]);
-
+  const [queryStatus, setQueryStatus] = useState<string | null>("Running this query");
   const [chartData, setChartData] = useState<any[]>([]); // State to store chart data
   const [chartType, setChartType] = useState<string | null>(null); // State to store chart type
-
+  const [canVisualize, setCanVisualize] = useState(false)
+  const [showSkeleton, setShowSkeleton] = useState(false)
   const supabase = createClient();
   const router = useRouter();
 
@@ -101,7 +110,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
   };
 
   const visualize = async (result: any) => {
-    setDynamicQuesLoading(true);
+    setVisualLoading(true)
     console.log(result)
     try {
       const response = await fetch("/api/visualize", {
@@ -109,7 +118,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ result }),
+        body: JSON.stringify({ result, generatedQuery }),
       });
 
       if (!response.ok) {
@@ -120,6 +129,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
       console.log("Visualize: ", visualizationData);
 
       if (visualizationData.canVisualize) {
+        setCanVisualize(true)
         // Prepare data for Recharts
         const chartData = visualizationData.chartData || []; // Assuming the API provides chartData
         setChartData(chartData); 
@@ -135,7 +145,8 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
       console.error("Error generating questions:", error);
       toast.error("Error checking visualization options.");
     }
-    setDynamicQuesLoading(false);
+    setVisualLoading(false)
+    setQueryStatus("Query executed successfully")
   };
 
   const executeQuery = async (query: string, questionIndex: number) => {
@@ -240,6 +251,14 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
     }
   }
   const askQuestion = async () => {
+    setShowSkeleton(true)
+    setCanVisualize(false)
+    setChartData([])
+    setEventDescription("")
+    setGeneratedQuery([])
+    setQueryResults([])
+    setNaturalLanguageResponse("")
+    setQueryStatus("Running this query")
     try {
       const generateQueryResponse = await fetch('http://localhost:5000/generate_query', {
         method: 'POST',
@@ -250,7 +269,8 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
       const generateQueryData = await generateQueryResponse.json();
       const generatedQuery = generateQueryData.query;
       console.log(generatedQuery)
-      setGeneratedQuery(generatedQuery);
+      // setGeneratedQuery(generatedQuery);
+      setGeneratedQuery((prevQueries) => [...prevQueries, generatedQuery]);
 
       const executeQueryResponse = await fetch('http://localhost:5000/execute_query', {
         method: 'POST',
@@ -260,16 +280,36 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
 
       const executeQueryData = await executeQueryResponse.json();
       const results = executeQueryData.results;
+      console.log("SQL query: ", executeQueryData.sql_query)
+      setGeneratedQuery((prevQueries) => {
+        if (prevQueries.includes(executeQueryData.sql_query)) {
+          return prevQueries;
+        }
+        return [...prevQueries, executeQueryData.sql_query];
+      });
       visualize(results); // Call visualize function here 
       setNaturalLanguageResponse(executeQueryData.natural_language_response);
       setSummary(executeQueryData.summary);
       console.log(results, executeQueryData.natural_language_response);
       console.log(executeQueryData.summary);
       setQueryResults(results);
+      setShowSkeleton(false)
+
     } catch (error) {
       // ... (Handle errors)
     }
   };
+
+  // Sample data for PieChart (replace with your actual data)
+  const pieChartData = [
+    { name: 'Category A', value: 400 },
+    { name: 'Category B', value: 300 },
+    { name: 'Category C', value: 300 },
+    { name: 'Category D', value: 200 },
+  ];
+
+  // Colors for PieChart slices
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
   return (
     <div className="flex w-full h-screen">
@@ -283,15 +323,11 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
             <DropdownMenuItem onClick={() => handleDbTypeChange("sqlite")}>
               SQLite
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDbTypeChange("postgresql")}>
-              PostgreSQL
-            </DropdownMenuItem>
+            
             <DropdownMenuItem onClick={() => handleDbTypeChange("mysql")}>
               MySQL
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDbTypeChange("mongodb")}>
-              MongoDB
-            </DropdownMenuItem>
+            
             <DropdownMenuItem onClick={() => handleDbTypeChange("Supabase")}>
               Supabase
             </DropdownMenuItem>
@@ -471,49 +507,126 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
                   value={questionInput}
                   onChange={(e) => setQuestionInput(e.target.value)}
                 />
-                <Button onClick={askQuestion}>Ask the question</Button>
+                <Button className="my-4" onClick={askQuestion}>Ask the question</Button>
 
-                {generatedQuery && (
-                  <div>
-                    <h3>Generated SQL/Query:</h3>
-                    <pre>{generatedQuery}</pre>
+              {generatedQuery.length == 0 && showSkeleton && (
+                 <>
+                 <Skeleton className="h-12 w-full my-2" />
+                 <Skeleton className="h-12 w-full my-2" />
+                 
+                 </>
+              )}
+                {generatedQuery.length > 0 && (
+                  <div className="border border-gray-300 rounded-lg p-4 shadow-md bg-gray-800 text-white mt-6">
+                  <h3 className="my-4 text-xl ">Generated SQL/Query:</h3>
+                  {generatedQuery.map((query, index) => (
+                  <div key={index} className="my-4">
+                  {index === generatedQuery.length - 1 && (
+                    <h4 className="text-lg text-green-400 ">{queryStatus}</h4>
+                  )}
+                  <pre
+                    className={`bg-gray-200 overflow-auto text-black p-2 text-3xl rounded ${
+                    index === generatedQuery.length - 1 ? 'bg-green-200' : 'bg-red-200'
+                    }`}
+                  >
+                    {query}
+                  </pre>
+                  </div>
+                  ))}
                   </div>
                 )}
 
+
+
+                {queryResults?.length == 0 && showSkeleton && (
+                   <>
+                   <Skeleton className="h-12 w-full my-2" />
+                   <Skeleton className="h-12 w-full my-2" />
+                   
+                   </>
+                )}
                 {queryResults?.length > 0 && (
-                  <div>
-                    <h3>Query Results:</h3>
+                  <div className="border border-gray-300 rounded-lg p-4 shadow-md bg-gray-800 mt-6">
+                    <h3 className="text-lg font-semibold mb-2">Query Results:</h3>
                     <ul>
                       {queryResults.map((row, index) => (
-                        <li key={index}>{JSON.stringify(row)}</li>
+                        <li className="text-xl" key={index}>{JSON.stringify(row)}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                {chartData.length > 0 && chartType && (
-                  <div>
-                    <h3>Visualization:</h3>
-                    {chartType === 'Bar Chart' && ( // Render BarChart if graphType is 'Bar graph'
-                      <BarChart width={600} height={300} data={chartData}>
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <CartesianGrid stroke="#f5f5f5" />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="value" fill="#8884d8" /> 
-                      </BarChart>
-                    )}
-                    {/* Add more chart types (e.g., LineChart, PieChart) based on visualizationData.graphType */}
+
+{!naturalLanguageResponse && showSkeleton &&(
+  <>
+  <Skeleton className="h-12 w-full my-2" />
+  <Skeleton className="h-12 w-full my-2" />
+  
+  </>
+)}
+{naturalLanguageResponse && (
+  <div className="border border-gray-300 rounded-lg p-4 shadow-md bg-gray-800 mt-6">
+    <h3 className="text-lg font-semibold mb-2 text-white">Natural Language Response</h3>
+    <p className="text-white text-xl">
+      {naturalLanguageResponse.split(/(\\.?\\*)/).map((part, index) =>
+        part.startsWith('**') && part.endsWith('**') ? (
+          <strong key={index}>{part.slice(2, -2)}</strong>
+        ) : (
+          part
+        )
+      )}
+    </p>
+  </div>
+)}
+              {chartData.length == 0 && visualLoading &&  (
+                <>
+                <Skeleton className="h-12 w-full my-2" />
+                <Skeleton className="h-12 w-full my-2" />
+                
+                </>
+              )}
+                 {chartData.length > 0  && canVisualize && (
+                  <div className="my-4 bg-gray-800 p-6 rounded-lg shadow-md">
+                    <h3 className="text-lg font-semibold mb-2 ">Visualization:</h3>
+
+                    <Tabs value={activeChart} onValueChange={setActiveChart}>
+                      <TabsList>
+                        <TabsTrigger value="bar">Bar Chart</TabsTrigger>
+                        <TabsTrigger value="pie">Pie Chart</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="bar">
+                        <BarChart className="mt-4" width={600} height={300} data={chartData}>
+                          <XAxis dataKey="name" />
+                          <YAxis />
+                          <CartesianGrid stroke="#f5f5f5" />
+                          <Tooltip />
+                          <Legend />
+                          <Bar dataKey="value" fill="#8884d8" />
+                        </BarChart>
+                      </TabsContent>
+                      <TabsContent value="pie">
+                        <PieChart width={400} height={300}>
+                          <Pie
+                            data={chartData}
+                            cx={200}
+                            cy={150}
+                            labelLine={false}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {pieChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Legend /> {/* Add a legend to the chart */}
+                        </PieChart>
+                      </TabsContent>
+                    </Tabs>
                   </div>
                 )}
 
-                {naturalLanguageResponse && (
-                  <div>
-                    <h3>Natural Language Response:</h3>
-                    <p>{naturalLanguageResponse}</p>
-                  </div>
-                )}
+
               </div>
             )
           }

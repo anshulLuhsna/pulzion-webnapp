@@ -14,11 +14,11 @@ export function EnvVarWarning() {
           size="sm"
           variant={"outline"}
           disabled
-          className="opacity-75 cursor-none pointer-events-none"
+          className="opacity-75 cursor-none pointer-events"
         >
-          <Link href="/sign-in">Sign in</Link>
+          <Link href="/protected">Dashboard</Link>
         </Button>
-        <Button
+        {/* <Button
           asChild
           size="sm"
           variant={"default"}
@@ -26,7 +26,7 @@ export function EnvVarWarning() {
           className="opacity-75 cursor-none pointer-events-none"
         >
           <Link href="/sign-up">Sign up</Link>
-        </Button>
+        </Button> */}
       </div>
     </div>
   );

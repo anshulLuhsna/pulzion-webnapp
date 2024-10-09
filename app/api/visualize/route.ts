@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
-  const { result: requestResult } = await request.json();
+  const { result: requestResult, generatedQuery } = await request.json();
 console.log("Here are the results:",    requestResult)
   try {
     const options = {
@@ -16,8 +16,11 @@ console.log("Here are the results:",    requestResult)
       body: JSON.stringify({
         question: `
         Tell me if I can visualize this result: Return true or false, type of graph (Always return 'Bar Chart' for now) and chart data to plot that can be plotted on recharts.
-        eg: canVisualize: true, graphType: Bar Chart, chartData: [...]
+        eg: canVisualize: true, graphType: Bar Chart, chartData: [...].
+        Here is the query result: ${generatedQuery}. Return true only if it is a SELECT type of query
+        If the chartData only has one entry then return false. The data should be enough to visualize by both bar charts and pie charts.
         Use the following data to give the chartData: ${requestResult}
+        Make sure x axis has string values and y axis has number values.
         `,
         preserve_history: true,
         "model": "aicon-v4-nano-160824",
