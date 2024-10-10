@@ -14,7 +14,7 @@ export function EnvVarWarning() {
           size="sm"
           variant={"outline"}
           disabled
-          className="opacity-75 cursor-none pointer-events"
+          className="opacity-75 cursor-none pointer-events  "
         >
           <Link href="/protected">Dashboard</Link>
         </Button>

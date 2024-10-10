@@ -44,6 +44,7 @@ type Notes = Tables<'notes'>;
 
 export default function ProtectedPage({ tableNames, user, tableData }: { user: any, tableNames: any, tableData: any }) {
   const [naturalLanguageResponse, setNaturalLanguageResponse] = useState("");
+  const [displayTableData, setDisplayTableData] = useState(tableData)
   const [summary, setSummary] = useState("");
   const [dynamicQuesLoading, setDynamicQuesLoading] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([
@@ -62,8 +63,9 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
     collection?: string; // Added for MongoDB
   }
   useEffect(() => {
-    console.log("Here", tableData, tableNames)
-  }, [tableData, tableNames]);
+    
+    setDisplayTableData(tableData)
+  }, [tableData]);
   const [dbParams, setDbParams] = useState<DbParams>({});
   const [visualLoading, setVisualLoading] = useState(false)
   const [questionInput, setQuestionInput] = useState("");
@@ -94,7 +96,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ eventDescription, tableData, tableNames }),
+        body: JSON.stringify({ eventDescription, displayTableData, tableNames }),
       });
 
       if (!response.ok) {
@@ -179,7 +181,7 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
             },
             body: JSON.stringify({
               eventDescription: newEventDescription,
-              tableData,
+              displayTableData,
               tableNames,
             }),
           });
@@ -223,13 +225,14 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
         });
 
         const tableDataArray = await Promise.all(tableDataPromises);
-        let tableData = Object.fromEntries(tableDataArray);
+        tableData = Object.fromEntries(tableDataArray);
+        setDisplayTableData(tableData)
         console.log(tableData)
         if (tableNamesError) {
           console.error("Error fetching table data:", tableNamesError);
         } else {
           const updatedTableData: Record<string, any> = {};
-
+          
           console.log(updatedTableData)
         }
 
@@ -464,21 +467,21 @@ export default function ProtectedPage({ tableNames, user, tableData }: { user: a
                   </div>
                 ))}
               </div>
-              {Object.keys(tableData).map((tableName) => (
+              {Object.keys(displayTableData).map((tableName) => (
                 <div key={tableName} className="border rounded-md p-4">
                   <h2 className="text-xl font-semibold mb-2">{tableName}</h2>
-                  {tableData[tableName]?.length > 0 ? (
+                  {displayTableData[tableName]?.length > 0 ? (
                     <Table>
                       <TableCaption>List of {tableName}</TableCaption>
                       <TableHeader>
                         <TableRow>
-                          {Object.keys(tableData[tableName][0]).map((header) => (
+                          {Object.keys(displayTableData[tableName][0]).map((header) => (
                             <TableHead key={header}>{header}</TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {tableData[tableName].map((row: Record<string, any>, index: number) => (
+                        {displayTableData[tableName].map((row: Record<string, any>, index: number) => (
                           <TableRow key={index}>
                             {Object.values(row).map((cell, cellIndex) => (
                               <TableCell key={cellIndex}>{cell}</TableCell>
